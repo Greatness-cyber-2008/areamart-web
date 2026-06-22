@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>My Orders — AreaMart</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+
+<header class="topbar" id="topbar"></header>
+
+<section class="section">
+  <div class="container">
+    <div class="section-head">
+      <div class="eyebrow">Order history</div>
+      <h1 class="section-title">My Orders</h1>
+    </div>
+
+    <div id="loadingState" class="empty">
+      <div class="loading-spin" style="border-color:rgba(0,0,0,0.1);border-top-color:var(--green);width:32px;height:32px;"></div>
+    </div>
+
+    <div id="emptyState" class="empty hidden">
+      <div class="icon">📦</div>
+      <div class="title">No orders yet</div>
+      <p class="text-sm mt-sm">When you place an order, it will appear here.</p>
+      <a href="index.html" class="btn btn-secondary mt-md">Start shopping</a>
+    </div>
+
+    <div id="ordersList" class="hidden"></div>
+    <div id="orderDetail" class="hidden"></div>
+  </div>
+</section>
+
+<script src="app.js"></script>
+<script>
+const STATUS_STEPS = ['pending','confirmed','preparing','out_for_delivery','delivered'];
+const STATUS_LABELS = {
+  pending: 'Pending',
+  confirmed: 'Confirmed',
+  preparing: 'Preparing',
+  out_for_delivery: 'On the way',
+  delivered: 'Delivered',
+  cancelled: 'Cancelled',
+};
+const STATUS_ICONS = {
+  pending:'🕐', confirmed:'✅', preparing:'👨‍🍳', out_for_delivery:'🛵', delivered:'📦', cancelled:'❌'
+};
+
+async function init() {
+  const user = await requireAuth();
+  if (!user) return;
+  renderTopbar('orders');
+
+  // Check if coming from a new order
+  const params = new URLSearchParams(window.location.search);
+  const newOrderId = params.get('new');
+
+  await loadOrders(newOrderId);
+}
+
+async function loadOrders(highlightId = null) {
+  const { data: orders, error } = await sb
+    .from('orders')
+    .select('*, order_items(*, products(name, category))')
+    .eq('customer_id', currentUser.id)
+    .order('created_at', { ascending: false });
+
+  document.getElementById('loadingState').classList.add('hidden');
+
+  if (error || !orders || orders.length === 0) {
+    document.getElementById('emptyState').classList.remove('hidden');
+    return;
+  }
+
+  document.getElementById('ordersList').classList.remove('hidden');
+  renderOrdersList(orders, highlightId);
+
+  // If coming from new order, expand it
+  if (highlightId) {
+    const order = orders.find(o => o.id === highlightId);
+    if (order) showOrderDetail(order);
+  }
+}
+
+function renderOrdersList(orders, highlightId) {
+  document.getElementById('ordersList').innerHTML = orders.map(o => `
+    <div class="panel" style="margin-bottom:.8rem;cursor:pointer;${o.id === highlightId ? 'border-color:var(--terracotta);' : ''}" onclick="toggleDetail('${o.id}', this)">
+      <div class="flex-between">
+        <div>
+          <div class="text-sm text-muted mono">#${o.id.slice(-8).toUpperCase()}</div>
+          <div style="font-family:'Space Grotesk',sans-serif;font-weight:700;margin:.2rem 0;">${formatNaira(o.total_amount)}</div>
+          <div class="text-sm text-muted">${new Date(o.created_at).toLocaleDateString('en-NG', {day:'numeric',month:'short',year:'numeric'})}</div>
+        </div>
+        <div style="text-align:right">
+          <div class="status-badge ${o.status}">
+            <span class="dot"></span>${STATUS_LABELS[o.status] || o.status}
+          </div>
+          <div class="text-sm text-muted mt-sm">${o.order_items?.length || 0} item${o.order_items?.length !== 1 ? 's' : ''}</div>
+        </div>
+      </div>
+      <div class="order-detail-panel" id="detail-${o.id}" style="display:none;margin-top:1rem;padding-top:1rem;border-top:1px solid var(--line);">
+        ${renderDetailHTML(o)}
+      </div>
+    </div>
+  `).join('');
+}
+
+function toggleDetail(orderId, card) {
+  const panel = document.getElementById(`detail-${orderId}`);
+  const isOpen = panel.style.display !== 'none';
+  panel.style.display = isOpen ? 'none' : 'block';
+}
+
+function renderDetailHTML(o) {
+  const steps = STATUS_STEPS;
+  const currentIdx = steps.indexOf(o.status);
+  const cancelled = o.status === 'cancelled';
+
+  const trackerHTML = cancelled ? `
+    <div class="status-badge cancelled" style="margin-bottom:1rem"><span class="dot"></span>This order was cancelled</div>
+  ` : `
+    <div class="tracker">
+      ${steps.map((step, i) => {
+        const done = i < currentIdx;
+        const active = i === currentIdx;
+        return `
+          <div class="tracker-step ${done ? 'done' : active ? 'active' : ''}">
+            <div class="tracker-line"></div>
+            <div class="pip">${done ? '✓' : active ? STATUS_ICONS[step] : ''}</div>
+            <div class="label">${STATUS_LABELS[step]}</div>
+          </div>`;
+      }).join('')}
+    </div>
+  `;
+
+  const itemsHTML = (o.order_items || []).map(item => `
+    <div class="cart-line" style="padding:.5rem 0">
+      <div class="img-sm">${emojiFor(item.products?.category)}</div>
+      <div class="info">
+        <div class="name">${item.products?.name || 'Product'}</div>
+        <div class="unit-price">Qty: ${item.quantity} × ${formatNaira(item.unit_price)}</div>
+      </div>
+      <div class="subtotal">${formatNaira(item.quantity * item.unit_price)}</div>
+    </div>
+  `).join('');
+
+  return `
+    ${trackerHTML}
+    <div class="eyebrow" style="margin-bottom:.5rem">Items ordered</div>
+    ${itemsHTML}
+    ${o.delivery_address ? `<div class="text-sm text-muted mt-sm">📍 ${o.delivery_address}</div>` : ''}
+    ${o.notes ? `<div class="text-sm text-muted mt-sm">📝 ${o.notes}</div>` : ''}
+    ${o.status === 'pending' ? `
+      <button onclick="cancelOrder('${o.id}')" class="btn btn-outline mt-md" style="border-color:var(--red);color:var(--red);font-size:.82rem;padding:.5rem 1rem;">
+        Cancel order
+      </button>` : ''}
+  `;
+}
+
+async function cancelOrder(orderId) {
+  if (!confirm('Are you sure you want to cancel this order?')) return;
+  const { error } = await sb
+    .from('orders')
+    .update({ status: 'cancelled' })
+    .eq('id', orderId)
+    .eq('customer_id', currentUser.id)
+    .eq('status', 'pending');
+
+  if (error) {
+    toast('Could not cancel order', 'error');
+  } else {
+    toast('Order cancelled', 'default');
+    await loadOrders();
+  }
+}
+
+init();
+</script>
+</body>
+</html>

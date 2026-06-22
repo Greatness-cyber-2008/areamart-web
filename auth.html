@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sign in — AreaMart</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+
+<header class="topbar" id="topbar"></header>
+
+<div class="auth-wrap">
+  <div class="auth-tabs">
+    <button class="auth-tab active" id="tabSignin" onclick="switchTab('signin')">Sign in</button>
+    <button class="auth-tab" id="tabSignup" onclick="switchTab('signup')">Create account</button>
+  </div>
+
+  <div class="panel">
+    <!-- SIGN IN FORM -->
+    <form id="signinForm">
+      <div class="field">
+        <label>Email</label>
+        <input type="email" id="siEmail" required placeholder="you@example.com">
+      </div>
+      <div class="field">
+        <label>Password</label>
+        <input type="password" id="siPassword" required placeholder="••••••••">
+      </div>
+      <button type="submit" class="btn btn-secondary btn-block" id="siBtn">Sign in</button>
+    </form>
+
+    <!-- SIGN UP FORM -->
+    <form id="signupForm" class="hidden">
+      <div class="field">
+        <label>Full name</label>
+        <input type="text" id="suName" required placeholder="Your name">
+      </div>
+      <div class="field">
+        <label>Email</label>
+        <input type="email" id="suEmail" required placeholder="you@example.com">
+      </div>
+      <div class="field">
+        <label>Phone number</label>
+        <input type="tel" id="suPhone" placeholder="080...">
+      </div>
+      <div class="field">
+        <label>Password</label>
+        <input type="password" id="suPassword" required minlength="6" placeholder="At least 6 characters">
+      </div>
+      <button type="submit" class="btn btn-secondary btn-block" id="suBtn">Create account</button>
+    </form>
+  </div>
+</div>
+
+<script src="app.js"></script>
+<script>
+async function init() {
+  await loadSession();
+  renderTopbar('');
+  if (currentUser) {
+    window.location.href = 'index.html';
+  }
+}
+
+function switchTab(tab) {
+  document.getElementById('tabSignin').classList.toggle('active', tab === 'signin');
+  document.getElementById('tabSignup').classList.toggle('active', tab === 'signup');
+  document.getElementById('signinForm').classList.toggle('hidden', tab !== 'signin');
+  document.getElementById('signupForm').classList.toggle('hidden', tab !== 'signup');
+}
+
+document.getElementById('signinForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = document.getElementById('siBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="loading-spin"></span>';
+
+  const email = document.getElementById('siEmail').value;
+  const password = document.getElementById('siPassword').value;
+
+  const { error } = await sb.auth.signInWithPassword({ email, password });
+
+  if (error) {
+    toast(error.message, 'error');
+    btn.disabled = false;
+    btn.textContent = 'Sign in';
+  } else {
+    toast('Welcome back!', 'success');
+    setTimeout(() => window.location.href = 'index.html', 600);
+  }
+});
+
+document.getElementById('signupForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = document.getElementById('suBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="loading-spin"></span>';
+
+  const fullName = document.getElementById('suName').value;
+  const email = document.getElementById('suEmail').value;
+  const phone = document.getElementById('suPhone').value;
+  const password = document.getElementById('suPassword').value;
+
+  const { data, error } = await sb.auth.signUp({
+    email,
+    password,
+    options: { data: { full_name: fullName } }
+  });
+
+  if (error) {
+    toast(error.message, 'error');
+    btn.disabled = false;
+    btn.textContent = 'Create account';
+    return;
+  }
+
+  // Update phone on profile (full_name handled by DB trigger)
+  if (data.user && phone) {
+    await sb.from('profiles').update({ phone }).eq('id', data.user.id);
+  }
+
+  toast('Account created! Welcome to AreaMart', 'success');
+  setTimeout(() => window.location.href = 'index.html', 800);
+});
+
+init();
+</script>
+</body>
+</html>

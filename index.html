@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AreaMart — Your Neighbourhood, Delivered</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+
+<header class="topbar" id="topbar"></header>
+
+<section class="section">
+  <div class="container">
+    <div class="section-head">
+      <div class="eyebrow">Fresh stock, daily</div>
+      <h1 class="section-title">What's on the shelf today</h1>
+    </div>
+
+    <div class="tab-row" id="categoryTabs">
+      <button class="tab-btn active" data-cat="all">All items</button>
+    </div>
+
+    <div id="productGrid" class="product-grid"></div>
+    <div id="emptyState" class="empty hidden">
+      <div class="icon">🛒</div>
+      <div class="title">No products yet</div>
+      <div class="text-sm">Check back soon — the shelves are being stocked.</div>
+    </div>
+  </div>
+</section>
+
+<script src="app.js"></script>
+<script>
+let allProducts = [];
+let activeCategory = 'all';
+
+async function init() {
+  await loadSession();
+  renderTopbar('shop');
+  await loadProducts();
+}
+
+async function loadProducts() {
+  const { data, error } = await sb
+    .from('products')
+    .select('*')
+    .eq('is_available', true)
+    .order('category', { ascending: true });
+
+  if (error) {
+    toast('Could not load products', 'error');
+    console.error(error);
+    return;
+  }
+
+  allProducts = data || [];
+  renderCategoryTabs();
+  renderProducts();
+}
+
+function renderCategoryTabs() {
+  const cats = [...new Set(allProducts.map(p => p.category).filter(Boolean))];
+  const tabsEl = document.getElementById('categoryTabs');
+  tabsEl.innerHTML = `<button class="tab-btn ${activeCategory === 'all' ? 'active' : ''}" onclick="setCategory('all')">All items</button>` +
+    cats.map(c => `<button class="tab-btn ${activeCategory === c ? 'active' : ''}" onclick="setCategory('${c.replace(/'/g, "\\'")}')">${emojiFor(c)} ${c}</button>`).join('');
+}
+
+function setCategory(cat) {
+  activeCategory = cat;
+  renderCategoryTabs();
+  renderProducts();
+}
+
+function renderProducts() {
+  const grid = document.getElementById('productGrid');
+  const empty = document.getElementById('emptyState');
+  const filtered = activeCategory === 'all' ? allProducts : allProducts.filter(p => p.category === activeCategory);
+
+  if (filtered.length === 0) {
+    grid.innerHTML = '';
+    empty.classList.remove('hidden');
+    return;
+  }
+  empty.classList.add('hidden');
+
+  grid.innerHTML = filtered.map(p => {
+    const outOfStock = p.stock_quantity <= 0;
+    const lowStock = p.stock_quantity > 0 && p.stock_quantity <= 5;
+    return `
+    <div class="product-card">
+      <div class="img-wrap">
+        ${outOfStock ? '<span class="stock-flag out">Out of stock</span>' : lowStock ? `<span class="stock-flag low">Only ${p.stock_quantity} left</span>` : ''}
+        ${emojiFor(p.category)}
+      </div>
+      <div class="body">
+        <div class="cat">${p.category || 'General'}</div>
+        <div class="name">${p.name}</div>
+        <div class="tag-row">
+          <span class="price">${Number(p.price).toLocaleString('en-NG', {minimumFractionDigits:2, maximumFractionDigits:2})}</span>
+          <button class="add-btn" ${outOfStock ? 'disabled' : ''} onclick='addToCart(${JSON.stringify(p)})'>+</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+init();
+</script>
+</body>
+</html>

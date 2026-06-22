@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin — AreaMart</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+.admin-grid{display:grid;grid-template-columns:220px 1fr;min-height:calc(100vh - 56px);}
+.admin-sidebar{background:#fff;border-right:1px solid var(--line);padding:1.2rem;}
+.admin-nav-item{display:flex;align-items:center;gap:.6rem;padding:.55rem .7rem;border-radius:var(--radius);font-size:.88rem;font-weight:500;color:var(--charcoal-soft);cursor:pointer;margin-bottom:.2rem;transition:all .15s;}
+.admin-nav-item:hover{background:var(--green-light);color:var(--green);}
+.admin-nav-item.active{background:var(--green);color:#fff;}
+.admin-main{padding:1.5rem;}
+.stat-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:.8rem;margin-bottom:1.5rem;}
+.stat-card{background:#fff;border:1px solid var(--line);border-radius:var(--radius-lg);padding:1rem;}
+.stat-card .num{font-family:'JetBrains Mono',monospace;font-size:1.6rem;font-weight:700;color:var(--green);}
+.stat-card .lbl{font-size:.75rem;color:var(--charcoal-soft);margin-top:.2rem;}
+.product-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:.8rem;}
+@media(max-width:700px){.admin-grid{grid-template-columns:1fr;}.admin-sidebar{display:none;}.product-form-grid{grid-template-columns:1fr;}}
+</style>
+</head>
+<body>
+
+<header class="topbar" id="topbar"></header>
+
+<div class="admin-grid">
+  <!-- Sidebar -->
+  <div class="admin-sidebar">
+    <div class="eyebrow" style="margin-bottom:.8rem">Admin Panel</div>
+    <div class="admin-nav-item active" onclick="showTab('dashboard')">📊 Dashboard</div>
+    <div class="admin-nav-item" onclick="showTab('orders')">📦 Orders</div>
+    <div class="admin-nav-item" onclick="showTab('products')">🛒 Products</div>
+    <div class="admin-nav-item" onclick="showTab('addProduct')">➕ Add Product</div>
+  </div>
+
+  <!-- Main content -->
+  <div class="admin-main">
+
+    <!-- DASHBOARD -->
+    <div id="tab-dashboard">
+      <div class="eyebrow">Overview</div>
+      <h2 style="margin-bottom:1.2rem">Dashboard</h2>
+      <div class="stat-cards" id="statCards">
+        <div class="stat-card"><div class="num" id="statOrders">—</div><div class="lbl">Total orders</div></div>
+        <div class="stat-card"><div class="num" id="statPending">—</div><div class="lbl">Pending</div></div>
+        <div class="stat-card"><div class="num" id="statProducts">—</div><div class="lbl">Products</div></div>
+        <div class="stat-card"><div class="num" id="statRevenue">—</div><div class="lbl">Revenue</div></div>
+      </div>
+    </div>
+
+    <!-- ORDERS -->
+    <div id="tab-orders" class="hidden">
+      <div class="eyebrow">Manage</div>
+      <h2 style="margin-bottom:1.2rem">All Orders</h2>
+      <div class="tab-row" id="orderFilterTabs">
+        <button class="tab-btn active" onclick="filterOrders('all',this)">All</button>
+        <button class="tab-btn" onclick="filterOrders('pending',this)">Pending</button>
+        <button class="tab-btn" onclick="filterOrders('confirmed',this)">Confirmed</button>
+        <button class="tab-btn" onclick="filterOrders('preparing',this)">Preparing</button>
+        <button class="tab-btn" onclick="filterOrders('out_for_delivery',this)">Out for delivery</button>
+        <button class="tab-btn" onclick="filterOrders('delivered',this)">Delivered</button>
+      </div>
+      <div class="panel" style="overflow-x:auto;">
+        <table class="admin-table" id="ordersTable">
+          <thead><tr>
+            <th>Order ID</th><th>Customer</th><th>Amount</th><th>Date</th><th>Status</th><th>Action</th>
+          </tr></thead>
+          <tbody id="ordersBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- PRODUCTS -->
+    <div id="tab-products" class="hidden">
+      <div class="eyebrow">Manage</div>
+      <h2 style="margin-bottom:1.2rem">Products</h2>
+      <div class="panel" style="overflow-x:auto;">
+        <table class="admin-table" id="productsTable">
+          <thead><tr>
+            <th>Name</th><th>Category</th><th>Price</th><th>Stock</th><th>Available</th><th>Actions</th>
+          </tr></thead>
+          <tbody id="productsBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ADD PRODUCT -->
+    <div id="tab-addProduct" class="hidden">
+      <div class="eyebrow">Inventory</div>
+      <h2 style="margin-bottom:1.2rem" id="productFormTitle">Add New Product</h2>
+      <div class="panel" style="max-width:560px">
+        <input type="hidden" id="editProductId">
+        <div class="product-form-grid">
+          <div class="field" style="grid-column:1/-1">
+            <label>Product name</label>
+            <input type="text" id="pName" placeholder="e.g. Rice (5kg bag)" required>
+          </div>
+          <div class="field">
+            <label>Category</label>
+            <select id="pCategory">
+              <option>Grains</option>
+              <option>Cooking Essentials</option>
+              <option>Pasta & Noodles</option>
+              <option>Canned Goods</option>
+              <option>Bakery</option>
+              <option>Dairy & Eggs</option>
+              <option>Beverages</option>
+              <option>Snacks</option>
+              <option>Fruits & Vegetables</option>
+              <option>Household</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Price (₦)</label>
+            <input type="number" id="pPrice" min="0" step="50" placeholder="0.00">
+          </div>
+          <div class="field">
+            <label>Stock quantity</label>
+            <input type="number" id="pStock" min="0" placeholder="0">
+          </div>
+          <div class="field">
+            <label>Available for sale</label>
+            <select id="pAvailable">
+              <option value="true">Yes</option>
+              <option value="false">No</option>
+            </select>
+          </div>
+        </div>
+        <div class="field">
+          <label>Description (optional)</label>
+          <textarea id="pDesc" rows="2" placeholder="Brief product description..."></textarea>
+        </div>
+        <div style="display:flex;gap:.8rem;flex-wrap:wrap">
+          <button class="btn btn-secondary" onclick="saveProduct()" id="saveProductBtn">Save Product</button>
+          <button class="btn btn-outline" onclick="resetProductForm()">Clear</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script src="app.js"></script>
+<script>
+let allOrders = [];
+let allProducts = [];
+let orderFilter = 'all';
+
+const STATUS_FLOW = ['pending','confirmed','preparing','out_for_delivery','delivered'];
+const STATUS_LABELS = {
+  pending:'Pending', confirmed:'Confirmed', preparing:'Preparing',
+  out_for_delivery:'Out for delivery', delivered:'Delivered', cancelled:'Cancelled'
+};
+
+async function init() {
+  const user = await requireAdmin();
+  if (!user) return;
+  renderTopbar('admin');
+  await Promise.all([loadStats(), loadOrders(), loadProducts()]);
+}
+
+function showTab(tab) {
+  ['dashboard','orders','products','addProduct'].forEach(t => {
+    document.getElementById(`tab-${t}`).classList.toggle('hidden', t !== tab);
+  });
+  document.querySelectorAll('.admin-nav-item').forEach((el, i) => {
+    el.classList.toggle('active', ['dashboard','orders','products','addProduct'][i] === tab);
+  });
+}
+
+async function loadStats() {
+  const [{ count: orderCount }, { count: pendingCount }, { count: productCount }, { data: revenue }] = await Promise.all([
+    sb.from('orders').select('*', { count: 'exact', head: true }),
+    sb.from('orders').select('*', { count: 'exact', head: true }).eq('status','pending'),
+    sb.from('products').select('*', { count: 'exact', head: true }),
+    sb.from('orders').select('total_amount').neq('status','cancelled'),
+  ]);
+  document.getElementById('statOrders').textContent = orderCount || 0;
+  document.getElementById('statPending').textContent = pendingCount || 0;
+  document.getElementById('statProducts').textContent = productCount || 0;
+  const total = (revenue || []).reduce((s, r) => s + Number(r.total_amount), 0);
+  document.getElementById('statRevenue').textContent = '₦' + total.toLocaleString('en-NG');
+}
+
+async function loadOrders() {
+  const { data, error } = await sb
+    .from('orders')
+    .select('*, profiles(full_name, phone)')
+    .order('created_at', { ascending: false });
+  if (!error) allOrders = data || [];
+  renderOrders();
+}
+
+function filterOrders(filter, btn) {
+  orderFilter = filter;
+  document.querySelectorAll('#orderFilterTabs .tab-btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  renderOrders();
+}
+
+function renderOrders() {
+  const filtered = orderFilter === 'all' ? allOrders : allOrders.filter(o => o.status === orderFilter);
+  const tbody = document.getElementById('ordersBody');
+  if (filtered.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:2rem;color:var(--charcoal-soft)">No orders found</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = filtered.map(o => {
+    const nextStatus = STATUS_FLOW[STATUS_FLOW.indexOf(o.status) + 1];
+    return `
+    <tr>
+      <td><span class="mono text-sm">#${o.id.slice(-8).toUpperCase()}</span></td>
+      <td>${o.profiles?.full_name || '—'}<br><span class="text-sm text-muted">${o.profiles?.phone || ''}</span></td>
+      <td><span class="mono">${formatNaira(o.total_amount)}</span></td>
+      <td class="text-sm">${new Date(o.created_at).toLocaleDateString('en-NG',{day:'numeric',month:'short'})}</td>
+      <td><span class="status-badge ${o.status}"><span class="dot"></span>${STATUS_LABELS[o.status]}</span></td>
+      <td>
+        ${nextStatus && o.status !== 'cancelled' ? `
+          <button class="btn btn-secondary" style="padding:.4rem .8rem;font-size:.78rem;" onclick="advanceOrder('${o.id}','${nextStatus}')">
+            → ${STATUS_LABELS[nextStatus]}
+          </button>` : ''}
+        ${o.status === 'pending' ? `
+          <button class="btn btn-outline" style="padding:.4rem .8rem;font-size:.78rem;border-color:var(--red);color:var(--red);margin-left:.4rem;" onclick="cancelOrderAdmin('${o.id}')">
+            Cancel
+          </button>` : ''}
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+async function advanceOrder(id, newStatus) {
+  const { error } = await sb.from('orders').update({ status: newStatus }).eq('id', id);
+  if (error) { toast('Update failed', 'error'); return; }
+  toast(`Order updated to ${STATUS_LABELS[newStatus]}`, 'success');
+  await loadOrders();
+  await loadStats();
+}
+
+async function cancelOrderAdmin(id) {
+  if (!confirm('Cancel this order?')) return;
+  await sb.from('orders').update({ status: 'cancelled' }).eq('id', id);
+  toast('Order cancelled');
+  await loadOrders();
+  await loadStats();
+}
+
+async function loadProducts() {
+  const { data, error } = await sb.from('products').select('*').order('category');
+  if (!error) allProducts = data || [];
+  renderProducts();
+}
+
+function renderProducts() {
+  document.getElementById('productsBody').innerHTML = allProducts.map(p => `
+    <tr>
+      <td><strong>${p.name}</strong></td>
+      <td>${p.category || '—'}</td>
+      <td class="mono">${formatNaira(p.price)}</td>
+      <td>
+        <span style="color:${p.stock_quantity <= 5 ? 'var(--red)' : 'var(--green)'};font-weight:600">
+          ${p.stock_quantity}
+        </span>
+      </td>
+      <td>${p.is_available ? '✅' : '❌'}</td>
+      <td style="display:flex;gap:.4rem;flex-wrap:wrap">
+        <button class="btn btn-outline" style="padding:.35rem .7rem;font-size:.78rem" onclick="editProduct(${JSON.stringify(p).replace(/"/g,'&quot;')})">Edit</button>
+        <button class="btn" style="padding:.35rem .7rem;font-size:.78rem;border:1px solid var(--red);color:var(--red)" onclick="deleteProduct('${p.id}')">Delete</button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+function editProduct(p) {
+  document.getElementById('editProductId').value = p.id;
+  document.getElementById('pName').value = p.name;
+  document.getElementById('pCategory').value = p.category || '';
+  document.getElementById('pPrice').value = p.price;
+  document.getElementById('pStock').value = p.stock_quantity;
+  document.getElementById('pAvailable').value = p.is_available ? 'true' : 'false';
+  document.getElementById('pDesc').value = p.description || '';
+  document.getElementById('productFormTitle').textContent = 'Edit Product';
+  showTab('addProduct');
+}
+
+function resetProductForm() {
+  document.getElementById('editProductId').value = '';
+  document.getElementById('pName').value = '';
+  document.getElementById('pPrice').value = '';
+  document.getElementById('pStock').value = '';
+  document.getElementById('pDesc').value = '';
+  document.getElementById('pAvailable').value = 'true';
+  document.getElementById('productFormTitle').textContent = 'Add New Product';
+}
+
+async function saveProduct() {
+  const id = document.getElementById('editProductId').value;
+  const payload = {
+    name: document.getElementById('pName').value.trim(),
+    category: document.getElementById('pCategory').value,
+    price: parseFloat(document.getElementById('pPrice').value),
+    stock_quantity: parseInt(document.getElementById('pStock').value),
+    is_available: document.getElementById('pAvailable').value === 'true',
+    description: document.getElementById('pDesc').value.trim() || null,
+  };
+
+  if (!payload.name || isNaN(payload.price)) {
+    toast('Please fill in all required fields', 'error');
+    return;
+  }
+
+  const btn = document.getElementById('saveProductBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="loading-spin"></span>';
+
+  const { error } = id
+    ? await sb.from('products').update(payload).eq('id', id)
+    : await sb.from('products').insert(payload);
+
+  btn.disabled = false;
+  btn.textContent = 'Save Product';
+
+  if (error) {
+    toast('Failed to save product', 'error');
+  } else {
+    toast(id ? 'Product updated!' : 'Product added!', 'success');
+    resetProductForm();
+    await loadProducts();
+    await loadStats();
+    showTab('products');
+  }
+}
+
+async function deleteProduct(id) {
+  if (!confirm('Delete this product permanently?')) return;
+  const { error } = await sb.from('products').delete().eq('id', id);
+  if (error) {
+    toast('Could not delete product', 'error');
+  } else {
+    toast('Product deleted');
+    await loadProducts();
+    await loadStats();
+  }
+}
+
+init();
+</script>
+</body>
+</html>

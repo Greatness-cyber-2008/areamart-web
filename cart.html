@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Your Cart — AreaMart</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+
+<header class="topbar" id="topbar"></header>
+
+<section class="section">
+  <div class="container">
+    <div class="section-head">
+      <div class="eyebrow">Review your items</div>
+      <h1 class="section-title">Your Cart</h1>
+    </div>
+
+    <div id="cartEmpty" class="empty hidden">
+      <div class="icon">🛒</div>
+      <div class="title">Your cart is empty</div>
+      <p class="text-sm mt-sm">Head back to the shop to add items.</p>
+      <a href="index.html" class="btn btn-secondary mt-md">Browse products</a>
+    </div>
+
+    <div id="cartContent" class="hidden">
+      <div style="display:grid; grid-template-columns:1fr 300px; gap:1.5rem; align-items:start;">
+
+        <!-- CART ITEMS -->
+        <div class="panel">
+          <div id="cartLines"></div>
+        </div>
+
+        <!-- ORDER SUMMARY -->
+        <div>
+          <div class="panel">
+            <div class="eyebrow" style="margin-bottom:.8rem">Order summary</div>
+            <div id="cartSummary"></div>
+
+            <div class="field mt-md">
+              <label>Delivery address</label>
+              <textarea id="deliveryAddress" rows="2" placeholder="Enter your delivery address..."></textarea>
+            </div>
+            <div class="field">
+              <label>Additional notes (optional)</label>
+              <input type="text" id="orderNotes" placeholder="e.g. Call when you arrive">
+            </div>
+
+            <button class="btn btn-primary btn-block mt-sm" id="checkoutBtn" onclick="checkout()">
+              Place Order
+            </button>
+            <a href="index.html" class="btn btn-outline btn-block mt-sm">Continue Shopping</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script src="app.js"></script>
+<script>
+async function init() {
+  await loadSession();
+  renderTopbar('cart');
+  renderCart();
+}
+
+function renderCart() {
+  const empty = document.getElementById('cartEmpty');
+  const content = document.getElementById('cartContent');
+
+  if (window.cart.length === 0) {
+    empty.classList.remove('hidden');
+    content.classList.add('hidden');
+    return;
+  }
+
+  empty.classList.add('hidden');
+  content.classList.remove('hidden');
+
+  // Cart lines
+  document.getElementById('cartLines').innerHTML = window.cart.map(item => `
+    <div class="cart-line" id="line-${item.id}">
+      <div class="img-sm">${emojiFor(item.category)}</div>
+      <div class="info">
+        <div class="name">${item.name}</div>
+        <div class="unit-price">${formatNaira(item.price)} each</div>
+      </div>
+      <div class="qty-stepper">
+        <button onclick="changeQty('${item.id}', ${item.qty - 1})">−</button>
+        <span class="qty">${item.qty}</span>
+        <button onclick="changeQty('${item.id}', ${item.qty + 1})">+</button>
+      </div>
+      <div class="subtotal">${formatNaira(item.price * item.qty)}</div>
+      <button onclick="removeItem('${item.id}')" style="color:var(--red);font-size:1rem;padding:0.3rem;">✕</button>
+    </div>
+  `).join('');
+
+  // Summary
+  const total = cartTotal();
+  const delivery = 500;
+  document.getElementById('cartSummary').innerHTML = `
+    <div class="cart-summary-row"><span>Subtotal</span><span>${formatNaira(total)}</span></div>
+    <div class="cart-summary-row"><span>Delivery fee</span><span>${formatNaira(delivery)}</span></div>
+    <div class="cart-summary-row total"><span>Total</span><span>${formatNaira(total + delivery)}</span></div>
+  `;
+}
+
+function changeQty(id, qty) {
+  updateCartQty(id, qty);
+  renderCart();
+}
+
+function removeItem(id) {
+  removeFromCart(id);
+  renderCart();
+}
+
+async function checkout() {
+  if (!currentUser) {
+    toast('Please sign in to place an order', 'error');
+    setTimeout(() => window.location.href = 'auth.html', 1000);
+    return;
+  }
+
+  const address = document.getElementById('deliveryAddress').value.trim();
+  if (!address) {
+    toast('Please enter a delivery address', 'error');
+    return;
+  }
+
+  const btn = document.getElementById('checkoutBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="loading-spin"></span> Placing order...';
+
+  const notes = document.getElementById('orderNotes').value.trim();
+  const total = cartTotal() + 500; // delivery
+
+  // 1. Create the order
+  const { data: order, error: orderErr } = await sb
+    .from('orders')
+    .insert({
+      customer_id: currentUser.id,
+      status: 'pending',
+      total_amount: total,
+      delivery_address: address,
+      notes: notes || null,
+    })
+    .select()
+    .single();
+
+  if (orderErr) {
+    toast('Failed to place order. Try again.', 'error');
+    btn.disabled = false;
+    btn.textContent = 'Place Order';
+    return;
+  }
+
+  // 2. Insert order items
+  const items = window.cart.map(i => ({
+    order_id: order.id,
+    product_id: i.id,
+    quantity: i.qty,
+    unit_price: i.price,
+  }));
+
+  const { error: itemsErr } = await sb.from('order_items').insert(items);
+
+  if (itemsErr) {
+    // Rollback order if items fail
+    await sb.from('orders').delete().eq('id', order.id);
+    toast('Failed to place order. Try again.', 'error');
+    btn.disabled = false;
+    btn.textContent = 'Place Order';
+    return;
+  }
+
+  // 3. Reduce stock quantities
+  for (const item of window.cart) {
+    await sb.rpc('decrement_stock', { p_id: item.id, qty: item.qty }).catch(() => {});
+  }
+
+  // 4. Clear cart and redirect
+  window.cart = [];
+  updateCartBadge();
+  toast('Order placed! 🎉', 'success');
+  setTimeout(() => window.location.href = `orders.html?new=${order.id}`, 800);
+}
+
+init();
+</script>
+</body>
+</html>

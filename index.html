@@ -92,7 +92,9 @@ function renderProducts() {
     <div class="product-card">
       <div class="img-wrap">
         ${outOfStock ? '<span class="stock-flag out">Out of stock</span>' : lowStock ? `<span class="stock-flag low">Only ${p.stock_quantity} left</span>` : ''}
-        ${emojiFor(p.category)}
+        ${p.image_url 
+          ? `<img src="${p.image_url}" alt="${p.name}" style="width:100%;height:100%;object-fit:cover;position:absolute;top:0;left:0;">`
+          : emojiFor(p.category)}
       </div>
       <div class="body">
         <div class="cat">${p.category || 'General'}</div>

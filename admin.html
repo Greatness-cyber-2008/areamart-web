@@ -132,6 +132,15 @@
           <label>Description (optional)</label>
           <textarea id="pDesc" rows="2" placeholder="Brief product description..."></textarea>
         </div>
+        <div class="field">
+          <label>Product Image</label>
+          <div id="imgPreviewWrap" style="display:none;margin-bottom:.6rem;">
+            <img id="imgPreview" src="" alt="Preview" style="width:100%;max-height:160px;object-fit:cover;border-radius:6px;border:1px solid var(--line);">
+            <button type="button" onclick="removeImage()" style="font-size:.78rem;color:var(--red);margin-top:.3rem;">Remove image</button>
+          </div>
+          <input type="file" id="pImage" accept="image/*" onchange="previewImage(this)" style="width:100%;padding:.5rem;border:1.5px dashed var(--line);border-radius:6px;background:var(--paper);cursor:pointer;">
+          <div class="text-sm text-muted mt-sm">JPG, PNG or WebP. Max 2MB.</div>
+        </div>
         <div style="display:flex;gap:.8rem;flex-wrap:wrap">
           <button class="btn btn-secondary" onclick="saveProduct()" id="saveProductBtn">Save Product</button>
           <button class="btn btn-outline" onclick="resetProductForm()">Clear</button>
@@ -255,7 +264,13 @@ async function loadProducts() {
 function renderProducts() {
   document.getElementById('productsBody').innerHTML = allProducts.map(p => `
     <tr>
-      <td><strong>${p.name}</strong></td>
+      <td style="display:flex;align-items:center;gap:.6rem;">
+        ${p.image_url 
+          ? `<img src="${p.image_url}" style="width:36px;height:36px;object-fit:cover;border-radius:4px;flex-shrink:0;">`
+          : `<div style="width:36px;height:36px;background:var(--green-light);border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:1.1rem;flex-shrink:0;">${emojiFor(p.category)}</div>`
+        }
+        <strong>${p.name}</strong>
+      </td>
       <td>${p.category || '—'}</td>
       <td class="mono">${formatNaira(p.price)}</td>
       <td>
@@ -281,6 +296,13 @@ function editProduct(p) {
   document.getElementById('pAvailable').value = p.is_available ? 'true' : 'false';
   document.getElementById('pDesc').value = p.description || '';
   document.getElementById('productFormTitle').textContent = 'Edit Product';
+  // Show existing image if present
+  if (p.image_url) {
+    document.getElementById('imgPreview').src = p.image_url;
+    document.getElementById('imgPreviewWrap').style.display = 'block';
+  } else {
+    document.getElementById('imgPreviewWrap').style.display = 'none';
+  }
   showTab('addProduct');
 }
 
@@ -292,10 +314,34 @@ function resetProductForm() {
   document.getElementById('pDesc').value = '';
   document.getElementById('pAvailable').value = 'true';
   document.getElementById('productFormTitle').textContent = 'Add New Product';
+  document.getElementById('pImage').value = '';
+  document.getElementById('imgPreviewWrap').style.display = 'none';
+  document.getElementById('imgPreview').src = '';
 }
 
 async function saveProduct() {
   const id = document.getElementById('editProductId').value;
+  // Handle image upload first if a file was selected
+  let imageUrl = null;
+  const imageFile = document.getElementById('pImage').files[0];
+  if (imageFile) {
+    if (imageFile.size > 2 * 1024 * 1024) {
+      toast('Image must be under 2MB', 'error');
+      return;
+    }
+    const ext = imageFile.name.split('.').pop();
+    const filename = `product-${Date.now()}.${ext}`;
+    const { data: uploadData, error: uploadErr } = await sb.storage
+      .from('product-images')
+      .upload(filename, imageFile, { upsert: true });
+    if (uploadErr) {
+      toast('Image upload failed: ' + uploadErr.message, 'error');
+      return;
+    }
+    const { data: urlData } = sb.storage.from('product-images').getPublicUrl(filename);
+    imageUrl = urlData.publicUrl;
+  }
+
   const payload = {
     name: document.getElementById('pName').value.trim(),
     category: document.getElementById('pCategory').value,
@@ -303,6 +349,7 @@ async function saveProduct() {
     stock_quantity: parseInt(document.getElementById('pStock').value),
     is_available: document.getElementById('pAvailable').value === 'true',
     description: document.getElementById('pDesc').value.trim() || null,
+    ...(imageUrl && { image_url: imageUrl }),
   };
 
   if (!payload.name || isNaN(payload.price)) {
@@ -342,6 +389,23 @@ async function deleteProduct(id) {
     await loadProducts();
     await loadStats();
   }
+}
+
+function previewImage(input) {
+  if (input.files && input.files[0]) {
+    const reader = new FileReader();
+    reader.onload = e => {
+      document.getElementById('imgPreview').src = e.target.result;
+      document.getElementById('imgPreviewWrap').style.display = 'block';
+    };
+    reader.readAsDataURL(input.files[0]);
+  }
+}
+
+function removeImage() {
+  document.getElementById('pImage').value = '';
+  document.getElementById('imgPreview').src = '';
+  document.getElementById('imgPreviewWrap').style.display = 'none';
 }
 
 init();

@@ -74,17 +74,33 @@ async function signOut() {
   window.location.href = 'index.html';
 }
 
-// ===== CART (stored in memory + localStorage-free, per-session) =====
-// Note: per project constraints, we avoid localStorage and keep cart in memory only.
-// Cart resets on page reload — acceptable for v1, can upgrade to DB-backed cart later.
-window.cart = window.cart || [];
+// ===== CART (sessionStorage-backed, persists across pages in same tab) =====
+const CART_KEY = 'areamart_cart';
+
+function getCart() {
+  try {
+    return JSON.parse(sessionStorage.getItem(CART_KEY)) || [];
+  } catch { return []; }
+}
+
+function saveCart(cart) {
+  sessionStorage.setItem(CART_KEY, JSON.stringify(cart));
+}
+
+// Keep window.cart in sync for backward compatibility
+Object.defineProperty(window, 'cart', {
+  get() { return getCart(); },
+  set(val) { saveCart(val); },
+  configurable: true,
+});
 
 function addToCart(product, qty = 1) {
-  const existing = window.cart.find(i => i.id === product.id);
+  const cart = getCart();
+  const existing = cart.find(i => i.id === product.id);
   if (existing) {
     existing.qty += qty;
   } else {
-    window.cart.push({
+    cart.push({
       id: product.id,
       name: product.name,
       price: product.price,
@@ -93,32 +109,35 @@ function addToCart(product, qty = 1) {
       stock_quantity: product.stock_quantity,
     });
   }
+  saveCart(cart);
   updateCartBadge();
   toast(`${product.name} added to cart`, 'success');
 }
 
 function removeFromCart(productId) {
-  window.cart = window.cart.filter(i => i.id !== productId);
+  saveCart(getCart().filter(i => i.id !== productId));
   updateCartBadge();
 }
 
 function updateCartQty(productId, qty) {
-  const item = window.cart.find(i => i.id === productId);
+  const cart = getCart();
+  const item = cart.find(i => i.id === productId);
   if (!item) return;
   if (qty <= 0) {
-    removeFromCart(productId);
+    saveCart(cart.filter(i => i.id !== productId));
   } else {
     item.qty = Math.min(qty, item.stock_quantity);
+    saveCart(cart);
   }
   updateCartBadge();
 }
 
 function cartTotal() {
-  return window.cart.reduce((sum, i) => sum + i.price * i.qty, 0);
+  return getCart().reduce((sum, i) => sum + i.price * i.qty, 0);
 }
 
 function cartCount() {
-  return window.cart.reduce((sum, i) => sum + i.qty, 0);
+  return getCart().reduce((sum, i) => sum + i.qty, 0);
 }
 
 function updateCartBadge() {

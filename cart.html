@@ -6,6 +6,7 @@
 <title>Your Cart — AreaMart</title>
 <link rel="stylesheet" href="style.css">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://js.paystack.co/v1/inline.js"></script>
 </head>
 <body>
 
@@ -26,34 +27,43 @@
     </div>
 
     <div id="cartContent" class="hidden">
-      <div style="display:grid; grid-template-columns:1fr 300px; gap:1.5rem; align-items:start;">
+      <div style="display:grid;grid-template-columns:1fr 300px;gap:1.5rem;align-items:start;">
 
-        <!-- CART ITEMS -->
         <div class="panel">
           <div id="cartLines"></div>
         </div>
 
-        <!-- ORDER SUMMARY -->
         <div>
           <div class="panel">
             <div class="eyebrow" style="margin-bottom:.8rem">Order summary</div>
             <div id="cartSummary"></div>
 
             <div class="field mt-md">
+              <label>Delivery option</label>
+              <select id="deliveryOption" onchange="renderCart()">
+                <option value="200">Standard delivery — ₦200</option>
+                <option value="0">Pickup (no delivery fee)</option>
+              </select>
+            </div>
+
+            <div class="field">
               <label>Delivery address</label>
               <textarea id="deliveryAddress" rows="2" placeholder="Enter your delivery address..."></textarea>
             </div>
+
             <div class="field">
               <label>Additional notes (optional)</label>
               <input type="text" id="orderNotes" placeholder="e.g. Call when you arrive">
             </div>
 
             <button class="btn btn-primary btn-block mt-sm" id="checkoutBtn" onclick="checkout()">
-              Place Order
+              Pay with Paystack 🔒
             </button>
             <a href="index.html" class="btn btn-outline btn-block mt-sm">Continue Shopping</a>
+            <p class="text-sm text-muted mt-sm" style="text-align:center">Secured by Paystack · SSL encrypted</p>
           </div>
         </div>
+
       </div>
     </div>
   </div>
@@ -61,28 +71,45 @@
 
 <script src="app.js"></script>
 <script>
+let effectiveDelivery = 200;
+
 async function init() {
   await loadSession();
+  if (!currentUser) {
+    window.location.href = 'auth.html';
+    return;
+  }
   renderTopbar('cart');
   renderCart();
 }
 
-function renderCart() {
-  const empty = document.getElementById('cartEmpty');
-  const content = document.getElementById('cartContent');
+async function checkFirstOrderDiscount() {
+  if (!currentUser) return false;
+  if (cartTotal() < 5000) return false;
+  const { count } = await sb
+    .from('orders')
+    .select('*', { count: 'exact', head: true })
+    .eq('customer_id', currentUser.id)
+    .neq('status', 'cancelled');
+  return count === 0;
+}
 
-  if (window.cart.length === 0) {
-    empty.classList.remove('hidden');
-    content.classList.add('hidden');
+function renderCart() {
+  const emptyEl = document.getElementById('cartEmpty');
+  const contentEl = document.getElementById('cartContent');
+  const cart = getCart();
+
+  if (cart.length === 0) {
+    emptyEl.classList.remove('hidden');
+    contentEl.classList.add('hidden');
     return;
   }
 
-  empty.classList.add('hidden');
-  content.classList.remove('hidden');
+  emptyEl.classList.add('hidden');
+  contentEl.classList.remove('hidden');
 
-  // Cart lines
-  document.getElementById('cartLines').innerHTML = window.cart.map(item => `
-    <div class="cart-line" id="line-${item.id}">
+  document.getElementById('cartLines').innerHTML = cart.map(item => `
+    <div class="cart-line">
       <div class="img-sm">${emojiFor(item.category)}</div>
       <div class="info">
         <div class="name">${item.name}</div>
@@ -98,25 +125,40 @@ function renderCart() {
     </div>
   `).join('');
 
-  // Summary
-  const total = cartTotal();
-  const delivery = 500;
-  document.getElementById('cartSummary').innerHTML = `
-    <div class="cart-summary-row"><span>Subtotal</span><span>${formatNaira(total)}</span></div>
-    <div class="cart-summary-row"><span>Delivery fee</span><span>${formatNaira(delivery)}</span></div>
-    <div class="cart-summary-row total"><span>Total</span><span>${formatNaira(total + delivery)}</span></div>
-  `;
+  const subtotal = cartTotal();
+  const deliverySelect = document.getElementById('deliveryOption');
+  const selectedDelivery = deliverySelect ? parseInt(deliverySelect.value) : 200;
+
+  checkFirstOrderDiscount().then(isFirstOrder => {
+    const freeDelivery = isFirstOrder && selectedDelivery > 0 && subtotal >= 5000;
+    effectiveDelivery = freeDelivery ? 0 : selectedDelivery;
+    const deliveryLabel = deliverySelect ? deliverySelect.options[deliverySelect.selectedIndex].text.split(' —')[0] : 'Standard delivery';
+
+    document.getElementById('cartSummary').innerHTML = `
+      <div class="cart-summary-row"><span>Subtotal</span><span>${formatNaira(subtotal)}</span></div>
+      ${freeDelivery
+        ? `<div class="cart-summary-row" style="color:var(--green)">
+             <span>🎉 First order — free delivery!</span>
+             <span>-${formatNaira(selectedDelivery)}</span>
+           </div>`
+        : `<div class="cart-summary-row">
+             <span>${deliveryLabel}</span>
+             <span>${effectiveDelivery === 0 ? 'Free' : formatNaira(effectiveDelivery)}</span>
+           </div>`
+      }
+      ${subtotal < 5000 && selectedDelivery > 0
+        ? `<div class="text-sm" style="color:var(--terracotta);margin:.3rem 0 .6rem;">
+             Add ${formatNaira(5000 - subtotal)} more for free first-order delivery!
+           </div>`
+        : ''
+      }
+      <div class="cart-summary-row total"><span>Total</span><span>${formatNaira(subtotal + effectiveDelivery)}</span></div>
+    `;
+  });
 }
 
-function changeQty(id, qty) {
-  updateCartQty(id, qty);
-  renderCart();
-}
-
-function removeItem(id) {
-  removeFromCart(id);
-  renderCart();
-}
+function changeQty(id, qty) { updateCartQty(id, qty); renderCart(); }
+function removeItem(id) { removeFromCart(id); renderCart(); }
 
 async function checkout() {
   if (!currentUser) {
@@ -124,26 +166,43 @@ async function checkout() {
     setTimeout(() => window.location.href = 'auth.html', 1000);
     return;
   }
-
+  const deliveryOption = parseInt(document.getElementById('deliveryOption').value);
   const address = document.getElementById('deliveryAddress').value.trim();
-  if (!address) {
-    toast('Please enter a delivery address', 'error');
+  if (!address && deliveryOption > 0) {
+    toast('Please enter your delivery address', 'error');
     return;
   }
+  const notes = document.getElementById('orderNotes').value.trim();
+  const total = cartTotal() + effectiveDelivery;
 
+  const handler = PaystackPop.setup({
+    key: 'pk_test_c37cb0e6719b5af241fffb481d386de01bed0d24',
+    email: currentUser.email,
+    amount: total * 100,
+    currency: 'NGN',
+    ref: 'AM-' + Date.now(),
+    callback: async function(response) {
+      await createOrder(response.reference, total, address || 'Pickup', notes);
+    },
+    onClose: function() {
+      toast('Payment cancelled', 'default');
+    }
+  });
+  handler.openIframe();
+}
+
+async function createOrder(paymentRef, total, address, notes) {
   const btn = document.getElementById('checkoutBtn');
   btn.disabled = true;
-  btn.innerHTML = '<span class="loading-spin"></span> Placing order...';
+  btn.innerHTML = '<span class="loading-spin"></span> Confirming...';
 
-  const notes = document.getElementById('orderNotes').value.trim();
-  const total = cartTotal() + 500; // delivery
+  const cart = getCart();
 
-  // 1. Create the order
   const { data: order, error: orderErr } = await sb
     .from('orders')
     .insert({
       customer_id: currentUser.id,
-      status: 'pending',
+      status: 'confirmed',
       total_amount: total,
       delivery_address: address,
       notes: notes || null,
@@ -152,40 +211,23 @@ async function checkout() {
     .single();
 
   if (orderErr) {
-    toast('Failed to place order. Try again.', 'error');
+    toast('Payment received but order failed. Contact us: ref ' + paymentRef, 'error');
     btn.disabled = false;
-    btn.textContent = 'Place Order';
+    btn.textContent = 'Pay with Paystack 🔒';
     return;
   }
 
-  // 2. Insert order items
-  const items = window.cart.map(i => ({
-    order_id: order.id,
-    product_id: i.id,
-    quantity: i.qty,
-    unit_price: i.price,
-  }));
+  await sb.from('order_items').insert(
+    cart.map(i => ({ order_id: order.id, product_id: i.id, quantity: i.qty, unit_price: i.price }))
+  );
 
-  const { error: itemsErr } = await sb.from('order_items').insert(items);
-
-  if (itemsErr) {
-    // Rollback order if items fail
-    await sb.from('orders').delete().eq('id', order.id);
-    toast('Failed to place order. Try again.', 'error');
-    btn.disabled = false;
-    btn.textContent = 'Place Order';
-    return;
-  }
-
-  // 3. Reduce stock quantities
-  for (const item of window.cart) {
+  for (const item of cart) {
     await sb.rpc('decrement_stock', { p_id: item.id, qty: item.qty }).catch(() => {});
   }
 
-  // 4. Clear cart and redirect
-  window.cart = [];
+  sessionStorage.removeItem('areamart_cart');
   updateCartBadge();
-  toast('Order placed! 🎉', 'success');
+  toast('Order confirmed! 🎉', 'success');
   setTimeout(() => window.location.href = `orders.html?new=${order.id}`, 800);
 }
 

@@ -38,6 +38,11 @@ let activeCategory = 'all';
 
 async function init() {
   await loadSession();
+  // Redirect to auth if not logged in
+  if (!currentUser) {
+    window.location.href = 'auth.html';
+    return;
+  }
   renderTopbar('shop');
   await loadProducts();
 }
